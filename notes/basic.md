@@ -1,4 +1,40 @@
-- [] finish reading ApplicationContext
+- [ ] finish reading ApplicationContext
+
+- [ClassPathXmlApplicationContext](#classpathxmlapplicationcontext)
+  - [Class Diagram](#class-diagram)
+    - [ResourceLoader](#resourceloader)
+    - [ResourcePatternResolver](#resourcepatternresolver)
+  - [Constructor](#constructor)
+    - [Superclass constructor](#superclass-constructor)
+  - [setConfigLocations](#setconfiglocations)
+    - [Environment](#environment)
+      - [Profile](#profile)
+      - [Property](#property)
+    - [StandartEnvironment constructor](#standartenvironment-constructor)
+      - [PropertySources](#propertysources)
+      - [PropertySource](#propertysource)
+    - [resolvePath](#resolvepath)
+      - [PropertyResolver](#propertyresolver)
+    - [Conclusion](#conclusion)
+- [Refresh](#refresh)
+  - [prepareRefresh](#preparerefresh)
+    - [initPropertySources](#initpropertysources)
+    - [validateRequiredProperties](#validaterequiredproperties)
+  - [obtainFreshBeanFactory](#obtainfreshbeanfactory)
+    - [Inheritance Hierachy](#inheritance-hierachy)
+    - [customizeBeanFactory](#customizebeanfactory)
+    - [loadBeanDefinition](#loadbeandefinition)
+  - [prepareBeanFactory(beanFactory)](#preparebeanfactorybeanfactory)
+  - [postProcessBeanFactory(beanFactory)](#postprocessbeanfactorybeanfactory)
+  - [invokeBeanFactoryPostProcessors(beanFactory)](#invokebeanfactorypostprocessorsbeanfactory)
+  - [registerBeanPostProcessors(beanFactory)](#registerbeanpostprocessorsbeanfactory)
+  - [initMessageSource](#initmessagesource)
+  - [initApplicationEventMulticaster](#initapplicationeventmulticaster)
+  - [onRefresh](#onrefresh)
+  - [registerListeners](#registerlisteners)
+  - [finishBeanFactoryInitialization(beanFactory)](#finishbeanfactoryinitializationbeanfactory)
+  - [finishRefresh](#finishrefresh)
+
 # ClassPathXmlApplicationContext
 ```java
 public class App {
@@ -201,7 +237,173 @@ protected String getPropertyAsRawString(String key) {
 }
 ```
 
-# Conclusion
+### Conclusion
 what setConfigLocations does is taking the locations passed into the constructor and replace the placeholders with correct system property/environment. results is config paths with placeholders replaced.
 
 # Refresh
+```java
+@Override
+public void refresh() throws BeansException, IllegalStateException {
+	synchronized (this.startupShutdownMonitor) {
+		// Prepare this context for refreshing.
+		prepareRefresh();
+
+		// Tell the subclass to refresh the internal bean factory.
+		ConfigurableListableBeanFactory beanFactory = obtainFreshBeanFactory();
+
+		// Prepare the bean factory for use in this context.
+		prepareBeanFactory(beanFactory);
+
+		try {
+			// Allows post-processing of the bean factory in context subclasses.
+			postProcessBeanFactory(beanFactory);
+
+			// Invoke factory processors registered as beans in the context.
+			invokeBeanFactoryPostProcessors(beanFactory);
+
+			// Register bean processors that intercept bean creation.
+			registerBeanPostProcessors(beanFactory);
+
+			// Initialize message source for this context.
+			initMessageSource();
+
+			// Initialize event multicaster for this context.
+			initApplicationEventMulticaster();
+
+			// Initialize other special beans in specific context subclasses.
+			onRefresh();
+
+			// Check for listener beans and register them.
+			registerListeners();
+
+			// Instantiate all remaining (non-lazy-init) singletons.
+			finishBeanFactoryInitialization(beanFactory);
+
+			// Last step: publish corresponding event.
+			finishRefresh();
+		}
+
+		catch (BeansException ex) {
+			if (logger.isWarnEnabled()) {
+				logger.warn("Exception encountered during context initialization - " +
+						"cancelling refresh attempt: " + ex);
+			}
+
+			// Destroy already created singletons to avoid dangling resources.
+			destroyBeans();
+
+			// Reset 'active' flag.
+			cancelRefresh(ex);
+
+			// Propagate exception to caller.
+			throw ex;
+		}
+
+		finally {
+			// Reset common introspection caches in Spring's core, since we
+			// might not ever need metadata for singleton beans anymore...
+			resetCommonCaches();
+		}
+	}
+}
+```
+
+## prepareRefresh
+```java
+protected void prepareRefresh() {
+	this.startupDate = System.currentTimeMillis();
+	this.closed.set(false);
+	this.active.set(true);
+	// Initialize any placeholder property sources in the context environment
+	initPropertySources();
+	// Validate that all properties marked as required are resolvable
+	// see ConfigurablePropertyResolver#setRequiredProperties
+	getEnvironment().validateRequiredProperties();
+	// Allow for the collection of early ApplicationEvents,
+	// to be published once the multicaster is available...
+	this.earlyApplicationEvents = new LinkedHashSet<>();
+}
+```
+### initPropertySources
+empty implementation, do noting by default
+### validateRequiredProperties
+AbstractEnvironment.validateRequiredProperties
+```java
+@Override
+public void validateRequiredProperties() throws MissingRequiredPropertiesException {
+    this.propertyResolver.validateRequiredProperties();
+}
+```
+AbstractPropertyResolver.validateRequiredProperties
+```java
+@Override
+public void validateRequiredProperties() {
+    MissingRequiredPropertiesException ex = new MissingRequiredPropertiesException();
+    for (String key : this.requiredProperties) {
+    	if (this.getProperty(key) == null) {
+    		ex.addMissingRequiredProperty(key);
+    	}
+    }
+    if (!ex.getMissingRequiredProperties().isEmpty()) {
+    	throw ex;
+    }
+}
+```
+the required properties can be marked by using setRequiredProperties method in AbstractEnvironment. The properties are stored in a Set. The default is empty, no validation needed.
+
+## obtainFreshBeanFactory
+```java
+protected ConfigurableListableBeanFactory obtainFreshBeanFactory() {
+	refreshBeanFactory();
+	return getBeanFactory();
+}
+```
+
+call to `AbstractRefreshableApplicationContext.refreshBeanFactory`:
+```java
+protected final void refreshBeanFactory() throws BeansException {
+	if (hasBeanFactory()) {
+		destroyBeans();
+		closeBeanFactory();
+	}
+	try {
+		DefaultListableBeanFactory beanFactory = createBeanFactory();
+		beanFactory.setSerializationId(getId());
+		customizeBeanFactory(beanFactory);
+		loadBeanDefinitions(beanFactory);
+		synchronized (this.beanFactoryMonitor) {
+			this.beanFactory = beanFactory;
+		}
+	}
+	catch (IOException ex) {
+		throw new ApplicationContextException("I/O error parsing bean definition source for " + getDisplayName(), ex);
+	}
+}
+```
+Here exisiting BeanFactory (if any) is destroyed and a new BeanFactory is created. The one created is a DefaultListableBeanFactory.
+
+if the file has a `DOCTYPE` definition then DTD validation is used, otherwise XSD is assumed.
+
+[XSD vs DTD参考](https://stackoverflow.com/questions/1544200/what-is-difference-between-xml-schema-and-dtd)
+
+[xml解析参考](https://www.ibm.com/developerworks/cn/xml/dm-1208gub/index.html)
+
+[bean name or id](https://stackoverflow.com/questions/874505/difference-between-using-bean-id-and-name-in-spring-configuration-file)
+
+- [ ] what is JAXP (Java API for XML processing)
+
+### Inheritance Hierachy
+- [ ] insert diagram here.
+### customizeBeanFactory
+### loadBeanDefinition
+
+## prepareBeanFactory(beanFactory)
+## postProcessBeanFactory(beanFactory)
+## invokeBeanFactoryPostProcessors(beanFactory)
+## registerBeanPostProcessors(beanFactory)
+## initMessageSource
+## initApplicationEventMulticaster
+## onRefresh
+## registerListeners
+## finishBeanFactoryInitialization(beanFactory)
+## finishRefresh
